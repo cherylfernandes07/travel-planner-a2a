@@ -71,6 +71,9 @@ Rules:
 - total = flights + hotels + activities + dailyMisc
 - fitsBudget = total <= userBudget
 - surplusDeficit = userBudget - total (positive = under budget, negative = over)
+- CRITICAL: All values must be pre-calculated integers or decimals — never write math expressions like "350 * 7" or "1450 + 5950"
+- Example correct: "dailyMisc": 2450
+- Example wrong: "dailyMisc": 350 * 7
 """
 
 
@@ -120,8 +123,20 @@ async def run_budget_agent(
             {"role": "user",   "content": user_message},
         ],
     )
-    raw = response.choices[0].message.content.strip()       
-    raw = raw.replace("```json", "").replace("```", "").strip() 
+    raw = response.choices[0].message.content.strip()
+    raw = raw.replace("```json", "").replace("```", "").strip()
+
+    # Safety net — replace any math expressions Groq snuck in
+    import re
+    def eval_math(match):
+        try:
+            return str(int(eval(match.group(0))))
+        except:
+            return match.group(0)
+
+    raw = re.sub(r'[\d\s\+\-\*\/\(\)]+(?=\s*[,\}])', eval_math, raw)
+    print(f"[budget raw response]:\n{raw}\n")
+
     data = json.loads(raw)
 
     return BudgetArtifact(

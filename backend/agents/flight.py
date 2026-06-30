@@ -93,6 +93,7 @@ async def run_flight_agent(request: TripRequest) -> FlightArtifact:
     )
     raw = response.choices[0].message.content.strip()  
     raw = raw.replace("```json", "").replace("```", "").strip()
+    print(f"[flight raw response]:\n{raw}\n")
     data = json.loads(raw)
 
     return FlightArtifact(

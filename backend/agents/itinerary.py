@@ -6,6 +6,8 @@ import os
 import json
 from models import TripRequest, ItineraryArtifact, Day, Activity
 from constants import GROQ_MODEL, GEMINI_MODEL, MAX_TOKENS_ITINERARY
+# Attempt to fix common Groq JSON issues
+import re
 
 # pyrefly: ignore [missing-import]
 from groq import AsyncGroq
@@ -65,6 +67,10 @@ Rules:
 - time in 24h format HH:MM
 - estCostUsd is per person in USD (0 for free activities)
 - Tailor activities to the traveler's interests
+- CRITICAL: Return a flat array of day objects — never nest day objects inside other day objects
+- CRITICAL: Each day number must appear exactly once
+- CRITICAL: Do not repeat or duplicate any day
+- Return valid JSON only — no extra text, no duplicate keys
 """
 
 
@@ -97,9 +103,37 @@ async def run_itinerary_agent(request: TripRequest) -> ItineraryArtifact:
             {"role": "user",   "content": user_message},
         ],
     )
-    raw = response.choices[0].message.content.strip() 
-    raw = raw.replace("```json", "").replace("```", "").strip() 
-    data = json.loads(raw)
+    raw = response.choices[0].message.content.strip()
+    raw = raw.replace("```json", "").replace("```", "").strip()
+
+    # Remove any incomplete trailing objects
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        # Find the last valid closing bracket
+        last_bracket = raw.rfind(']')
+        if last_bracket > 0:
+            raw = raw[:last_bracket + 1]
+            # wrap back in days object if needed
+            if not raw.strip().startswith('{'):
+                raw = '{"days": ' + raw + '}'
+            # try again
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                raise RuntimeError(f"Itinerary agent returned unparseable JSON")
+        else:
+            raise RuntimeError(f"Itinerary agent returned unparseable JSON")
+
+    # Deduplicate days by day number — keep first occurrence
+    seen_days = set()
+    unique_days = []
+    for day in data["days"]:
+        if day["day"] not in seen_days:
+            seen_days.add(day["day"])
+            unique_days.append(day)
+    data["days"] = unique_days
+    print(f"[itinerary raw response]:\n{raw}\n")
 
     return ItineraryArtifact(
         days=[

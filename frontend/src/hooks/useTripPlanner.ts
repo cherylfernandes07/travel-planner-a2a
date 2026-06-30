@@ -12,6 +12,7 @@
 import { useState, useRef, useCallback } from "react";
 import { WSEvent, TripPlan, AgentName, TaskStatus } from "../lib/ws-events";
 import { MOCK_WS_SEQUENCE } from "../lib/mock-ws-events";
+import { useAuth } from '@clerk/nextjs'
 
 // ── Public types ──────────────────────────────────────────────
 
@@ -74,6 +75,7 @@ export function useTripPlanner(): UseTripPlannerReturn {
 
   const wsRef = useRef<WebSocket | null>(null);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const { getToken } = useAuth()
 
   // ── Shared event processor (same for mock + real) ─────────
   const processEvent = useCallback((wsEvent: WSEvent) => {
@@ -103,11 +105,7 @@ export function useTripPlanner(): UseTripPlannerReturn {
         break;
 
       case "plan_complete":
-        setPlan(wsEvent.data);
-        setStatus("complete");
-        break;
-
-      case "plan_complete":
+      case "plan_partial":
         setPlan(wsEvent.data);
         setStatus("complete");
         break;
@@ -133,52 +131,68 @@ export function useTripPlanner(): UseTripPlannerReturn {
   }, [processEvent]);
 
   // ── Real WebSocket mode ───────────────────────────────────
-  const startReal = useCallback((request: TripRequest) => {
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL;
-    if (!wsUrl) {
-      setError("NEXT_PUBLIC_WS_URL is not set");
-      setStatus("error");
-      return;
-    }
+const startReal = useCallback(async (request: TripRequest) => {
+  const wsUrl = process.env.NEXT_PUBLIC_WS_URL;
+  if (!wsUrl) {
+    setError("NEXT_PUBLIC_WS_URL is not set");
+    setStatus("error");
+    return;
+  }
 
-    setStatus("connecting");
+  setStatus("connecting");
 
-    // POST to /plan first — gets back a session_id
-    fetch(wsUrl.replace("ws", "http").replace("/ws", "/plan"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
-    })
-      .then(r => r.json())
-      .then(({ sessionId }) => {
-        const ws = new WebSocket(`${wsUrl}/${sessionId}`);
-        wsRef.current = ws;
+  // Get Clerk token
+  const token = await getToken();
+  if (!token) {
+    setError("Not authenticated");
+    setStatus("error");
+    return;
+  }
 
-        ws.onopen = () => setStatus("planning");
-
-        ws.onmessage = (e) => {
-          try {
-            const event = JSON.parse(e.data) as WSEvent;
-            processEvent(event);
-          } catch {
-            console.error("Failed to parse WS event", e.data);
-          }
-        };
-
-        ws.onerror = () => {
-          setError("WebSocket connection failed");
-          setStatus("error");
-        };
-
-        ws.onclose = () => {
-          if (status !== "complete") setStatus("error");
-        };
-      })
-      .catch(err => {
-        setError(err.message);
+  // POST to /plan with Authorization header
+  fetch(wsUrl.replace("ws://", "http://").replace("/ws", "/plan"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${token}`,  // ← sends Clerk JWT
+    },
+    body: JSON.stringify(request),
+  })
+    .then(r => r.json())
+    .then(({ sessionId }) => {
+      if (!sessionId) {
+        setError("Failed to create session");
         setStatus("error");
-      });
-  }, [processEvent, status]);
+        return;
+      }
+      const ws = new WebSocket(`${wsUrl}/${sessionId}`);
+      wsRef.current = ws;
+
+      ws.onopen = () => setStatus("planning");
+
+      ws.onmessage = (e) => {
+        try {
+          const event = JSON.parse(e.data) as WSEvent;
+          processEvent(event);
+        } catch {
+          console.error("Failed to parse WS event", e.data);
+        }
+      };
+
+      ws.onerror = () => {
+        setError("WebSocket connection failed");
+        setStatus("error");
+      };
+
+      ws.onclose = () => {
+        if (status !== "complete") setStatus("error");
+      };
+    })
+    .catch(err => {
+      setError(err.message);
+      setStatus("error");
+    });
+}, [processEvent, status, getToken]);  // ← getToken added here
 
   // ── Public startPlanning — checks env var ─────────────────
   const startPlanning = useCallback((request: TripRequest) => {

@@ -1,16 +1,16 @@
-# ─────────────────────────────────────────────────────────────
 # models.py
 # Pydantic models — mirror the TypeScript types in ws-events.ts
 # exactly. If you change a field here, update the TS types too.
-# ─────────────────────────────────────────────────────────────
 
 from __future__ import annotations
 from enum import Enum
 from typing import Literal, Optional, Union
-from pydantic import BaseModel
+from datetime import date
+import re
+from pydantic import BaseModel, field_validator, model_validator
 
 
-# ── Enums ─────────────────────────────────────────────────────
+# Enums
 
 class AgentName(str, Enum):
     flight    = "flight"
@@ -25,19 +25,87 @@ class TaskStatus(str, Enum):
     failed    = "failed"
 
 
-# ── Inbound request (from frontend POST /plan) ────────────────
+# Inbound request (from frontend POST /plan)
+
+SAFE_TEXT_RE = re.compile(r'^[a-zA-Z0-9\s\-\',\.]+$')
 
 class TripRequest(BaseModel):
     destination:   str
     origin:        str
-    departureDate: str           # ISO 8601 e.g. "2025-10-15"
+    departureDate: str
     returnDate:    str
-    budget:        float         # USD
+    budget:        float
     travelers:     int = 1
     interests:     list[str] = []
 
+    @field_validator('destination', 'origin')
+    @classmethod
+    def validate_location(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError('Cannot be empty')
+        if len(v) > 100:
+            raise ValueError('Cannot exceed 100 characters')
+        if not SAFE_TEXT_RE.match(v):
+            raise ValueError('Contains invalid characters')
+        return v
 
-# ── Artifact shapes ───────────────────────────────────────────
+    @field_validator('departureDate', 'returnDate')
+    @classmethod
+    def validate_date_format(cls, v: str) -> str:
+        try:
+            date.fromisoformat(v)
+        except ValueError:
+            raise ValueError('Must be a valid date in YYYY-MM-DD format')
+        return v
+
+    @field_validator('budget')
+    @classmethod
+    def validate_budget(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError('Budget must be greater than $0')
+        if v > 100_000:
+            raise ValueError('Budget cannot exceed $100,000')
+        return v
+
+    @field_validator('travelers')
+    @classmethod
+    def validate_travelers(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError('Must have at least 1 traveler')
+        if v > 20:
+            raise ValueError('Cannot exceed 20 travelers')
+        return v
+
+    @field_validator('interests')
+    @classmethod
+    def validate_interests(cls, v: list[str]) -> list[str]:
+        if len(v) > 10:
+            raise ValueError('Cannot have more than 10 interests')
+        for interest in v:
+            if len(interest) > 50:
+                raise ValueError(f'Interest "{interest[:20]}..." exceeds 50 characters')
+        return v
+
+    @model_validator(mode='after')
+    def validate_dates(self) -> 'TripRequest':
+        dep = date.fromisoformat(self.departureDate)
+        ret = date.fromisoformat(self.returnDate)
+        today = date.today()
+
+        if dep < today:
+            raise ValueError('Departure date must be in the future')
+        if ret <= dep:
+            raise ValueError('Return date must be after departure date')
+        if (ret - dep).days > 30:
+            raise ValueError('Trip cannot exceed 30 days')
+        if (ret - dep).days < 1:
+            raise ValueError('Trip must be at least 1 day')
+
+        return self
+
+
+# Artifact shapes
 
 class FlightOption(BaseModel):
     id:           str
@@ -90,7 +158,7 @@ class BudgetArtifact(BaseModel):
     surplusDeficit: float
 
 
-# ── Assembled trip plan ───────────────────────────────────────
+# Assembled trip plan
 
 class TripPlan(BaseModel):
     destination: str
@@ -101,9 +169,7 @@ class TripPlan(BaseModel):
     budget:      Optional[BudgetArtifact]    = None
 
 
-# ── WebSocket event shapes ────────────────────────────────────
-# These are what the backend pushes down the WS connection.
-# Match ws-events.ts on the frontend exactly.
+# WebSocket event shapes
 
 class TaskCreatedEvent(BaseModel):
     event:  Literal["task_created"] = "task_created"
@@ -132,7 +198,6 @@ class AgentError(BaseModel):
     message: str
 
 class PlanPartialEvent(BaseModel):
-    """Emitted when some agents failed but others succeeded."""
     event:         Literal["plan_partial"] = "plan_partial"
     data:          TripPlan
     failed_agents: list[AgentError]

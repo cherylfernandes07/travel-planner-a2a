@@ -11,7 +11,7 @@ from fastapi import Request, HTTPException
 
 # ── Config ────────────────────────────────────────────────────
 
-MAX_REQUESTS_PER_DAY = 5
+MAX_REQUESTS_PER_DAY = 20
 WINDOW_SECONDS = 86400  # 24 hours
 
 # ── Redis client ──────────────────────────────────────────────

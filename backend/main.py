@@ -5,7 +5,7 @@ import uuid
 import json
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 # A2A SDK
@@ -20,6 +20,10 @@ from agents.flight    import AGENT_CARD as flight_card
 from agents.hotel     import AGENT_CARD as hotel_card
 from agents.itinerary import AGENT_CARD as itinerary_card
 from agents.budget    import AGENT_CARD as budget_card
+
+from auth import verify_clerk_token
+
+from database import init_db, save_trip_plan, get_user_trips, get_trip_by_id
 
 
 # ── App setup ─────────────────────────────────────────────────
@@ -81,12 +85,21 @@ async def budget_agent_card():
     return budget_card
 
 # ── POST /plan ────────────────────────────────────────────────
+sessions: dict[str, TripRequest] = {}
+session_metadata: dict[str, str] = {}  # session_id → user_id
+
 @app.post("/plan")
-async def create_plan(request: TripRequest, http_request: Request) -> dict:
+async def create_plan(
+    request: TripRequest,
+    http_request: Request,
+    token_payload: dict = Depends(verify_clerk_token),
+) -> dict:
+    user_id = token_payload.get("sub")
     ip = get_client_ip(http_request)
     usage = await check_rate_limit(ip)
     session_id = str(uuid.uuid4())
     sessions[session_id] = request
+    session_metadata[session_id] = user_id  # ← store user_id
     return {"sessionId": session_id, "rateLimit": usage}
 
 # ── WS /ws/{session_id} ───────────────────────────────────────
@@ -102,8 +115,24 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         await websocket.close()
         return
 
+    # get user_id from session metadata
+    user_id = session_metadata.pop(session_id, None)
+
     async def push(event: WSEvent):
         await websocket.send_text(event.model_dump_json())
+
+        # save plan when complete
+        if event.event in ("plan_complete", "plan_partial"):
+            if user_id:
+                import uuid
+                await save_trip_plan(
+                    plan_id=str(uuid.uuid4()),
+                    user_id=user_id,
+                    destination=event.data.destination,
+                    dates=event.data.dates,
+                    plan_data=event.data.model_dump(),
+                    status="complete" if event.event == "plan_complete" else "partial",
+                )
 
     try:
         await run_planner(request, push)
@@ -115,8 +144,27 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         }))
     finally:
         sessions.pop(session_id, None)
+        session_metadata.pop(session_id, None)
 
 # ── Health check ──────────────────────────────────────────────
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+@app.get("/trips")
+async def get_trips(
+    token_payload: dict = Depends(verify_clerk_token),
+) -> list:
+    user_id = token_payload.get("sub")
+    return await get_user_trips(user_id)
+
+@app.get("/trips/{plan_id}")
+async def get_trip(
+    plan_id: str,
+    token_payload: dict = Depends(verify_clerk_token),
+) -> dict:
+    user_id = token_payload.get("sub")
+    trip = await get_trip_by_id(plan_id, user_id)
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    return trip
