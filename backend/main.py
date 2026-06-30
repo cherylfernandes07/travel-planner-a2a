@@ -24,11 +24,16 @@ from agents.budget    import AGENT_CARD as budget_card
 from auth import verify_clerk_token
 
 from database import init_db, save_trip_plan, get_user_trips, get_trip_by_id
+from logger import setup_logging, get_logger
+import uuid as uuid_module
 
+log = get_logger("main")
 
 # ── App setup ─────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    setup_logging()  # ← add this
+    await init_db()    
     yield
 
 app = FastAPI(title="AI Travel Planner", lifespan=lifespan)
@@ -85,7 +90,6 @@ async def budget_agent_card():
     return budget_card
 
 # ── POST /plan ────────────────────────────────────────────────
-sessions: dict[str, TripRequest] = {}
 session_metadata: dict[str, str] = {}  # session_id → user_id
 
 @app.post("/plan")
@@ -97,9 +101,18 @@ async def create_plan(
     user_id = token_payload.get("sub")
     ip = get_client_ip(http_request)
     usage = await check_rate_limit(ip)
-    session_id = str(uuid.uuid4())
+    session_id = str(uuid_module.uuid4())
+    trace_id = str(uuid_module.uuid4())[:8]  # short trace ID
     sessions[session_id] = request
-    session_metadata[session_id] = user_id  # ← store user_id
+    session_metadata[session_id] = {"user_id": user_id, "trace_id": trace_id}
+
+    log.info("Plan request received", extra={
+        "trace_id": trace_id,
+        "user_id": user_id,
+        "destination": request.destination,
+        "ip": ip,
+    })
+
     return {"sessionId": session_id, "rateLimit": usage}
 
 # ── WS /ws/{session_id} ───────────────────────────────────────
@@ -115,13 +128,13 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         await websocket.close()
         return
 
-    # get user_id from session metadata
-    user_id = session_metadata.pop(session_id, None)
+    # get metadata
+    meta = session_metadata.pop(session_id, {})
+    user_id = meta.get("user_id")
+    trace_id = meta.get("trace_id", "")
 
     async def push(event: WSEvent):
         await websocket.send_text(event.model_dump_json())
-
-        # save plan when complete
         if event.event in ("plan_complete", "plan_partial"):
             if user_id:
                 import uuid
@@ -135,10 +148,11 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 )
 
     try:
-        await run_planner(request, push)
+        await run_planner(request, push, trace_id=trace_id)  # ← pass trace_id
     except WebSocketDisconnect:
-        print(f"[ws] client disconnected: {session_id}")
+        log.info("Client disconnected", extra={"trace_id": trace_id})
     except Exception as e:
+        log.error(f"WebSocket error: {e}", extra={"trace_id": trace_id})
         await websocket.send_text(json.dumps({
             "event": "error", "message": str(e)
         }))
@@ -146,6 +160,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         sessions.pop(session_id, None)
         session_metadata.pop(session_id, None)
 
+        
 # ── Health check ──────────────────────────────────────────────
 @app.get("/health")
 async def health():

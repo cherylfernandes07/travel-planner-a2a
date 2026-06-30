@@ -133,7 +133,7 @@ async def run_itinerary_agent(request: TripRequest) -> ItineraryArtifact:
             seen_days.add(day["day"])
             unique_days.append(day)
     data["days"] = unique_days
-    print(f"[itinerary raw response]:\n{raw}\n")
+    # print(f"[itinerary raw response]:\n{raw}\n")
 
     return ItineraryArtifact(
         days=[

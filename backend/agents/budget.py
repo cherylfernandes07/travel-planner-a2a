@@ -135,7 +135,7 @@ async def run_budget_agent(
             return match.group(0)
 
     raw = re.sub(r'[\d\s\+\-\*\/\(\)]+(?=\s*[,\}])', eval_math, raw)
-    print(f"[budget raw response]:\n{raw}\n")
+    # print(f"[budget raw response]:\n{raw}\n")
 
     data = json.loads(raw)
 

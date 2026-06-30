@@ -74,6 +74,7 @@ export function useTripPlanner(): UseTripPlannerReturn {
   const [error, setError] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
+  const isCompleteRef = useRef(false);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const { getToken } = useAuth()
 
@@ -85,7 +86,6 @@ export function useTripPlanner(): UseTripPlannerReturn {
     };
 
     setEventLog(prev => [...prev, entry]);
-
     switch (wsEvent.event) {
       case "task_created":
       case "task_updated":
@@ -108,6 +108,7 @@ export function useTripPlanner(): UseTripPlannerReturn {
       case "plan_partial":
         setPlan(wsEvent.data);
         setStatus("complete");
+        isCompleteRef.current = true; 
         break;
 
       case "error":
@@ -185,7 +186,11 @@ const startReal = useCallback(async (request: TripRequest) => {
       };
 
       ws.onclose = () => {
-        if (status !== "complete") setStatus("error");
+        // if (status !== "complete") setStatus("error");
+        if (!isCompleteRef.current) {
+          setError("Connection closed unexpectedly");
+          setStatus("error");
+        }        
       };
     })
     .catch(err => {
@@ -209,20 +214,18 @@ const startReal = useCallback(async (request: TripRequest) => {
   }, [startMock, startReal]);
 
   // ── Reset everything ──────────────────────────────────────
-  const reset = useCallback(() => {
-    // clear mock timers
-    timersRef.current.forEach(clearTimeout);
-    timersRef.current = [];
-    // close real WS
-    wsRef.current?.close();
-    wsRef.current = null;
-    // reset state
-    setStatus("idle");
-    setAgents(INITIAL_AGENTS);
-    setEventLog([]);
-    setPlan(null);
-    setError(null);
-  }, []);
+const reset = useCallback(() => {
+  timersRef.current.forEach(clearTimeout);
+  timersRef.current = [];
+  wsRef.current?.close();
+  wsRef.current = null;
+  isCompleteRef.current = false;  // ← add this
+  setStatus("idle");
+  setAgents(INITIAL_AGENTS);
+  setEventLog([]);
+  setPlan(null);
+  setError(null);
+}, []);
 
   return { status, agents, eventLog, plan, error, startPlanning, reset };
 }

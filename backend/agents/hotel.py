@@ -97,7 +97,7 @@ async def run_hotel_agent(request: TripRequest) -> HotelArtifact:
     )
     raw = response.choices[0].message.content.strip() 
     raw = raw.replace("```json", "").replace("```", "").strip() 
-    print(f"[hotel raw response]:\n{raw}\n")
+    # print(f"[hotel raw response]:\n{raw}\n")
     data = json.loads(raw)
 
     return HotelArtifact(
