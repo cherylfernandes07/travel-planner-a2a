@@ -151,7 +151,7 @@ const startReal = useCallback(async (request: TripRequest) => {
   }
 
   // POST to /plan with Authorization header
-  fetch(wsUrl.replace("ws://", "http://").replace("/ws", "/plan"), {
+  fetch(wsUrl.replace("wss://", "https://").replace("ws://", "http://").replace("/ws", "/plan"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
