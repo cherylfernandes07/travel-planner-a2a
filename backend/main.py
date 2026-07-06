@@ -37,10 +37,12 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title="AI Travel Planner", lifespan=lifespan)
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "https://*.vercel.app"],
+    allow_origins=[
+        "http://localhost:3000",
+        "https://travel-planner-a2a-front-end.vercel.app",
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
