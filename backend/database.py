@@ -29,12 +29,21 @@ raw_url = os.environ["DATABASE_URL"].replace(
 # Create SSL context for NeonDB
 ssl_context = ssl.create_default_context()
 
+# engine = create_async_engine(
+#     raw_url,
+#     echo=False,
+#     pool_size=5,
+#     max_overflow=10,
+#     connect_args={"ssl": ssl_context},
+# )
+
 engine = create_async_engine(
     raw_url,
     echo=False,
     pool_size=5,
     max_overflow=10,
-    connect_args={"ssl": ssl_context},
+    pool_pre_ping=True,       # ← checks connection health before using it
+    pool_recycle=300,          # ← recycles connections every 5 minutes
 )
 
 AsyncSessionLocal = sessionmaker(
