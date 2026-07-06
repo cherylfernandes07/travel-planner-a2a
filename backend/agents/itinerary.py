@@ -8,6 +8,8 @@ from models import TripRequest, ItineraryArtifact, Day, Activity
 from constants import GROQ_MODEL, GEMINI_MODEL, MAX_TOKENS_ITINERARY
 # Attempt to fix common Groq JSON issues
 import re
+import logging
+
 
 # pyrefly: ignore [missing-import]
 from groq import AsyncGroq
@@ -108,6 +110,7 @@ async def run_itinerary_agent(request: TripRequest) -> ItineraryArtifact:
 
     # Remove any incomplete trailing objects
     try:
+        logging.info(f"Itinerary raw response: {raw[:500]}")
         data = json.loads(raw)
     except json.JSONDecodeError:
         # Find the last valid closing bracket
