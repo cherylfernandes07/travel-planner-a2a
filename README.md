@@ -7,7 +7,7 @@ each exposing a `/.well-known/agent-card.json` discovery endpoint per the A2A sp
 Results stream to the frontend over WebSockets as each agent completes, so users see
 their plan build progressively in real time.
 
-🚀 **[Live Demo](https://travel-planner-a2a-front-end.vercel.app)**
+🚀 **[Live Demo](https://travel-planner-a2a-front-end.vercel.app)** · 🎥 **[Demo Video](https://youtu.be/KCTgk7MbkLE)**
 
 ---
 
