@@ -153,3 +153,23 @@ async def get_trip_by_id(plan_id: str, user_id: str) -> dict | None:
             "status":      row.status,
             "createdAt":   row.created_at.isoformat(),
         }
+
+class WaitlistRecord(Base):
+    __tablename__ = "waitlist"
+
+    email      = Column(String, primary_key=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+async def save_waitlist_email(email: str) -> dict:
+    """Save an email to the waitlist. Silently ignores duplicates."""
+    async with AsyncSessionLocal() as session:
+        try:
+            record = WaitlistRecord(email=email)
+            session.add(record)
+            await session.commit()
+            return {"success": True}
+        except Exception:
+            # duplicate email — already on the list
+            await session.rollback()
+            return {"success": True}  # don't tell user if already signed up    

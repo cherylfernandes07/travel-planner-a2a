@@ -23,9 +23,10 @@ from agents.budget    import AGENT_CARD as budget_card
 
 from auth import verify_clerk_token
 
-from database import init_db, save_trip_plan, get_user_trips, get_trip_by_id
+from database import init_db, save_trip_plan, get_user_trips, get_trip_by_id, save_waitlist_email
 from logger import setup_logging, get_logger
 import uuid as uuid_module
+from pydantic import BaseModel, EmailStr
 
 log = get_logger("main")
 
@@ -185,3 +186,13 @@ async def get_trip(
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
     return trip
+
+
+
+class WaitlistRequest(BaseModel):
+    email: EmailStr
+
+@app.post("/waitlist")
+async def join_waitlist(request: WaitlistRequest) -> dict:
+    await save_waitlist_email(request.email)
+    return {"message": "You're on the list!"}
